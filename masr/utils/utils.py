@@ -60,7 +60,7 @@ def labels_to_string(label, vocabulary, eos, blank_index=0):
     labels = []
     for l in label:
         index_list = [index for index in l if index != blank_index and index != -1 and index != eos]
-        labels.append((''.join([vocabulary[index] for index in index_list])).replace('<space>', ' '))
+        labels.append([vocabulary[index].replace('<space>', ' ').replace('<unk>', '') for index in index_list])
     return labels
 
 

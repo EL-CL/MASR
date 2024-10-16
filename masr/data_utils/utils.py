@@ -12,7 +12,6 @@ import resampy
 import soundfile
 from pydub import AudioSegment
 from tqdm import tqdm
-from zhconv import convert
 
 from masr.data_utils.binary import DatasetWriter
 from masr.utils.logger import setup_logger
@@ -52,6 +51,8 @@ def create_manifest(annotation_path, train_manifest_path, test_manifest_path, is
     test_list = []
     durations = []
     for annotation_text in os.listdir(annotation_path):
+        if not os.path.splitext(annotation_text)[-1] in ['.txt', '.json']:
+            continue
         annotation_text_path = os.path.join(annotation_path, annotation_text)
         if os.path.splitext(annotation_text_path)[-1] == '.json':
             with open(annotation_text_path, 'r', encoding='utf-8') as f:
@@ -69,20 +70,18 @@ def create_manifest(annotation_path, train_manifest_path, test_manifest_path, is
                     change_rate(audio_path, target_sr=target_sr)
                 # 获取音频长度
                 durations.append(duration)
-                text = text.lower().strip()
                 if only_keep_zh_en:
                     # 过滤非法的字符
                     text = is_ustr(text)
                 if len(text) == 0: continue
-                # 保证全部都是简体
-                text = convert(text, 'zh-cn')
+                text = text.split('|')
                 # 加入数据列表中
                 line = dict(audio_filepath=audio_path.replace('\\', '/'),
                             text=text,
                             duration=duration,
                             start_time=start_time,
                             end_time=end_time)
-                if annotation_text == 'test.json':
+                if annotation_text_path.endswith('test.json'):
                     test_list.append(line)
                 else:
                     data_list.append(line)
@@ -102,18 +101,17 @@ def create_manifest(annotation_path, train_manifest_path, test_manifest_path, is
                 audio_data, samplerate = soundfile.read(audio_path)
                 duration = float(len(audio_data)) / samplerate
                 durations.append(duration)
-                text = text.lower().strip()
+                # text = text.lower().strip()
                 if only_keep_zh_en:
                     # 过滤非法的字符
                     text = is_ustr(text)
                 if len(text) == 0 or text == ' ': continue
-                # 保证全部都是简体
-                text = convert(text, 'zh-cn')
+                text = text.split('|')
                 # 加入数据列表中
                 line = dict(audio_filepath=audio_path.replace('\\', '/'),
                             text=text,
                             duration=duration)
-                if annotation_text == 'test.txt':
+                if annotation_text_path.endswith('test.json'):
                     test_list.append(line)
                 else:
                     data_list.append(line)
@@ -284,14 +282,14 @@ def count_manifest(counter, manifest_path):
     with open(manifest_path, 'r', encoding='utf-8') as f:
         for line in tqdm(f.readlines()):
             line = json.loads(line)
-            for char in line["text"].replace('\n', ''):
-                counter.update(char)
+            for char in line["text"]:
+                counter[char] += 1
     if os.path.exists(manifest_path.replace('train', 'test')):
         with open(manifest_path.replace('train', 'test'), 'r', encoding='utf-8') as f:
             for line in tqdm(f.readlines()):
                 line = json.loads(line)
-                for char in line["text"].replace('\n', ''):
-                    counter.update(char)
+                for char in line["text"]:
+                    counter[char] += 1
 
 
 def create_manifest_binary(train_manifest_path, test_manifest_path):

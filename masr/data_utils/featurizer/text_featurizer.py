@@ -47,7 +47,7 @@ class TextFeaturizer(object):
 
     def _char_tokenize(self, text):
         """Character tokenizer."""
-        return list(text.strip())
+        return text
 
     def _load_vocabulary_from_file(self, vocab_filepath):
         """Load vocabulary from file."""

@@ -292,17 +292,19 @@ class MASRTrainer(object):
         return last_epoch, best_error_rate
 
     # 保存模型
-    def __save_checkpoint(self, save_model_path, epoch_id, error_rate=1.0, test_loss=1e3, best_model=False):
+    def __save_checkpoint(self, save_model_path, epoch_id, error_rate=1.0, test_loss=1e3, is_best_model=False, save_as_best_model=False):
         if isinstance(self.model, torch.nn.parallel.DistributedDataParallel):
             state_dict = self.model.module.state_dict()
         else:
             state_dict = self.model.state_dict()
         save_model_name = f'{self.configs.use_model}_{"streaming" if self.configs.streaming else "non-streaming"}' \
                           f'_{self.configs.preprocess_conf.feature_method}'
-        if best_model:
-            model_path = os.path.join(save_model_path, save_model_name, 'best_model')
-        else:
-            model_path = os.path.join(save_model_path, save_model_name, 'epoch_{}'.format(epoch_id))
+        folder_name = 'epoch_{}'.format(epoch_id)
+        if is_best_model:
+            folder_name += '_best'
+        if save_as_best_model:
+            folder_name = 'best_model'
+        model_path = os.path.join(save_model_path, save_model_name, folder_name)
         os.makedirs(model_path, exist_ok=True)
         torch.save(self.optimizer.state_dict(), os.path.join(model_path, 'optimizer.pt'))
         torch.save(state_dict, os.path.join(model_path, 'model.pt'))
@@ -310,14 +312,14 @@ class MASRTrainer(object):
             data = {"last_epoch": epoch_id, f"test_{self.configs.metrics_type}": error_rate, "test_loss": test_loss,
                     "version": __version__}
             f.write(json.dumps(data))
-        if not best_model:
+        if not save_as_best_model:
             last_model_path = os.path.join(save_model_path, save_model_name, 'last_model')
             shutil.rmtree(last_model_path, ignore_errors=True)
             shutil.copytree(model_path, last_model_path)
             # 删除旧的模型
-            old_model_path = os.path.join(save_model_path, save_model_name, 'epoch_{}'.format(epoch_id - 3))
-            if os.path.exists(old_model_path):
-                shutil.rmtree(old_model_path)
+            # old_model_path = os.path.join(save_model_path, save_model_name, 'epoch_{}'.format(epoch_id - 3))
+            # if os.path.exists(old_model_path):
+            #     shutil.rmtree(old_model_path)
         logger.info('已保存模型：{}'.format(model_path))
 
     def __decoder_result(self, outs, vocabulary):
@@ -568,28 +570,39 @@ class MASRTrainer(object):
             # 多卡训练只使用一个进程执行评估和保存模型
             if self.local_rank == 0:
                 if self.stop_eval: continue
-                logger.info('=' * 70)
-                self.eval_loss, self.eval_error_result = self.evaluate(resume_model=None)
+                # logger.info('=' * 70)
+                self.eval_loss, self.eval_error_result = self.evaluate(resume_model=None, epoch_id=epoch_id)
                 logger.info(
                     f'Test epoch: {epoch_id}, time/epoch: {str(timedelta(seconds=(time.time() - start_epoch)))}, '
                     f'loss: {self.eval_loss:.5f}, {self.configs.metrics_type}: {self.eval_error_result:.5f}, '
                     f'best {self.configs.metrics_type}: '
                     f'{self.eval_error_result if self.eval_error_result <= self.eval_best_error_rate else self.eval_best_error_rate:.5f}')
-                logger.info('=' * 70)
+                # logger.info('=' * 70)
                 writer.add_scalar(f'Test/{self.configs.metrics_type}', self.eval_error_result, self.test_log_step)
                 writer.add_scalar('Test/Loss', self.eval_loss, self.test_log_step)
                 self.test_log_step += 1
                 self.model.train()
                 # 保存最优模型
+                is_best_model = False
                 if self.eval_error_result <= self.eval_best_error_rate:
                     self.eval_best_error_rate = self.eval_error_result
+                    is_best_model = True
                     self.__save_checkpoint(save_model_path=save_model_path, epoch_id=epoch_id,
-                                           error_rate=self.eval_error_result, test_loss=self.eval_loss, best_model=True)
+                                           error_rate=self.eval_error_result, test_loss=self.eval_loss, save_as_best_model=True)
                 # 保存模型
                 self.__save_checkpoint(save_model_path=save_model_path, epoch_id=epoch_id,
-                                       error_rate=self.eval_error_result, test_loss=self.eval_loss)
+                                       error_rate=self.eval_error_result, test_loss=self.eval_loss, is_best_model=is_best_model)
+                if is_best_model:
+                    eval_txt_path = 'models/eval_epoch_' + str(epoch_id) + '.txt'
+                    try:
+                        os.rename(eval_txt_path, eval_txt_path.replace('.txt', '_best.txt'))
+                    except:
+                        print('Rename eval txt error!')
 
-    def evaluate(self, resume_model='models/conformer_streaming_fbank/best_model/', display_result=False):
+    def evaluate(self, resume_model='models/conformer_streaming_fbank/best_model/', display_result=False,
+                 display_all_batch_id=False, portion_to_display_batch_id=4,
+                 step_to_write_eval_txt=1000,
+                 epoch_id=-1):
         """
         评估模型
         :param resume_model: 所使用的模型
@@ -619,8 +632,15 @@ class MASRTrainer(object):
 
         error_results, losses = [], []
         eos = self.test_dataset.vocab_size - 1
+        eval_txt_path = 'models/eval_epoch_' + str(epoch_id) + '.txt'
+        f = open(eval_txt_path, 'w', encoding='utf-8')
+        eval_result_buffer = ''
         with torch.no_grad():
-            for batch_id, batch in enumerate(tqdm(self.test_loader)):
+            tests = self.test_loader()
+            step_to_display_batch_id = len(tests) // portion_to_display_batch_id
+            if display_result:
+                step_to_display_batch_id = 20
+            for batch_id, batch in enumerate(tests):
                 if self.stop_eval: break
                 inputs, labels, input_lens, label_lens = batch
                 inputs = inputs.to(self.device)
@@ -632,7 +652,12 @@ class MASRTrainer(object):
                 outputs = eval_model.get_encoder_out(inputs, input_lens).cpu().detach().numpy()
                 out_strings = self.__decoder_result(outs=outputs, vocabulary=self.test_dataset.vocab_list)
                 labels_str = labels_to_string(labels, self.test_dataset.vocab_list, eos=eos)
+                if display_all_batch_id or batch_id % step_to_display_batch_id == 0:
+                    logger.info('Evaluate: %d / %d' % (batch_id, len(tests)))
+                eval_result_buffer += '> ' + str(batch_id) + '\n'
                 for out_string, label in zip(*(out_strings, labels_str)):
+                    eval_result_buffer += '|'.join(label) + '\n'
+                    eval_result_buffer += '|'.join(out_string) + '\n'
                     # 计算字错率或者词错率
                     if self.configs.metrics_type == 'wer':
                         error_rate = wer(out_string, label)
@@ -640,11 +665,16 @@ class MASRTrainer(object):
                         error_rate = cer(out_string, label)
                     error_results.append(error_rate)
                     if display_result:
-                        logger.info(f'预测结果为：{out_string}')
                         logger.info(f'实际标签为：{label}')
+                        logger.info(f'预测结果为：{out_string}')
                         logger.info(f'这条数据的{self.configs.metrics_type}：{round(error_rate, 6)}，'
                                     f'当前{self.configs.metrics_type}：{round(sum(error_results) / len(error_results), 6)}')
                         logger.info('-' * 70)
+                if batch_id % step_to_write_eval_txt == 0:
+                    f.write(eval_result_buffer)
+                    eval_result_buffer = ''
+        f.write(eval_result_buffer)
+        f.close()
         loss = float(sum(losses) / len(losses)) if len(losses) > 0 else -1
         error_result = float(sum(error_results) / len(error_results)) if len(error_results) > 0 else -1
         self.model.train()

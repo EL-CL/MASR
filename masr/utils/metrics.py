@@ -9,7 +9,8 @@ def cer(prediction, label):
         prediction (string): 比较的字符串
         label (string): 比较的字符串
     """
-    prediction, label, = prediction.replace(" ", ""), label.replace(" ", "")
+    prediction = [i for i in prediction if i]
+    label = [i for i in label if i]
     return Lev.distance(prediction, label) / float(len(label))
 
 

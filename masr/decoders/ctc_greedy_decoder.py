@@ -24,11 +24,11 @@ def greedy_decoder(probs_seq, vocabulary, blank_index=0):
     index_list = [index_group[0] for index_group in groupby(max_index_list)]
     index_list = [index for index in index_list if index != blank_index]
     # 索引列表转换为字符串
-    text = ''.join([vocabulary[index] for index in index_list])
+    text = [vocabulary[index].replace('<space>', ' ') for index in index_list]
     score = 0
     if len(max_prob_list) > 0:
         score = float(sum(max_prob_list) / len(max_prob_list)) * 100.0
-    return score, text.replace('<space>', ' ')
+    return score, text
 
 
 def greedy_decoder_batch(probs_split, vocabulary, blank_index=0):
@@ -82,8 +82,8 @@ def greedy_decoder_chunk(probs_seq, vocabulary, last_max_prob_list=None, last_ma
     index_list = [index_group[0] for index_group in groupby(last_max_prob_list)]
     index_list = [index for index in index_list if index != blank_index]
     # 索引列表转换为字符串
-    text = ''.join([vocabulary[index] for index in index_list])
+    text = [vocabulary[index].replace('<space>', ' ') for index in index_list]
     score = 0
     if len(last_max_index_list) > 0:
         score = float(sum(last_max_index_list) / len(last_max_index_list)) * 100.0
-    return score, text.replace('<space>', ' '), last_max_prob_list, last_max_index_list
+    return score, text, last_max_prob_list, last_max_index_list

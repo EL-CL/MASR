@@ -27,7 +27,7 @@ decoder_conf:
 
 # 模型其他参数配置
 model_conf:
-  ctc_weight: 0.3
+  ctc_weight: 0.3  # may want to try 0.1
   lsm_weight: 0.1
   reverse_weight: 0.3
   length_normalized_loss: false
@@ -35,25 +35,25 @@ model_conf:
 # 数据集参数
 dataset_conf:
   # 训练的批量大小
-  batch_size: 8
+  batch_size: 12
   # 读取数据的线程数量
-  num_workers: 4
+  num_workers: 32
   # 过滤最短的音频长度
   min_duration: 0.5
   # 过滤最长的音频长度，当为-1的时候不限制长度
-  max_duration: 20
+  max_duration: -1  # 目前最长的是31.99
   # 训练数据的数据列表路径
-  train_manifest: 'dataset/manifest.train'
+  train_manifest: '../IPA-recognition/manifest0531/manifest.train'
   # 测试数据的数据列表路径
-  test_manifest: 'dataset/manifest.test'
+  test_manifest: '../IPA-recognition/manifest0531/manifest.test'
   # 数据字典的路径
-  dataset_vocab: 'dataset/vocabulary.txt'
+  dataset_vocab: '../IPA-recognition/manifest0531/vocabulary.txt'
   # 均值和标准值得json文件路径，后缀 (.json)
-  mean_istd_path: 'dataset/mean_istd.json'
+  mean_istd_path: '../IPA-recognition/manifest0531/mean_istd.json'
   # 噪声数据列表文件
-  noise_manifest_path: 'dataset/manifest.noise'
+  noise_manifest_path: '../IPA-recognition/manifest0531/manifest.noise'
   # 数据列表类型，支持txt、binary
-  manifest_type: 'txt'
+  manifest_type: 'binary'
 
 # 数据预处理参数
 preprocess_conf:
@@ -85,7 +85,7 @@ ctc_beam_search_decoder_conf:
   # 剪枝的最大值
   cutoff_top_n: 40
   # 语言模型文件路径
-  language_model_path: 'lm/zh_giga.no_cna_cmn.prune01244.klm'
+  language_model_path: '../IPA-recognition/manifest0531/lm.klm'
 
 # 优化方法参数配置
 optimizer_conf:
@@ -115,7 +115,7 @@ train_conf:
   # 训练的轮数
   max_epoch: 200
   # 多少batch打印一次日志
-  log_interval: 100
+  log_interval: 500
 
 # 所使用的模型
 use_model: 'conformer'
