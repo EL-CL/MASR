@@ -369,7 +369,7 @@ class MASRTrainer(object):
                 if num_utts == 0:
                     continue
                 # 执行模型计算，是否开启自动混合精度
-                with torch.cuda.amp.autocast(enabled=self.configs.train_conf.enable_amp):
+                with torch.amp.autocast('cuda', enabled=self.configs.train_conf.enable_amp):
                     loss_dict = self.model(inputs, input_lens, labels, label_lens)
                 if torch.cuda.device_count() > 1 and batch_id % accum_grad != 0:
                     context = self.model.no_sync
@@ -524,7 +524,7 @@ class MASRTrainer(object):
         nranks = torch.cuda.device_count()
         if nranks > 1:
             # 初始化NCCL环境
-            dist.init_process_group(backend='nccl')
+            dist.init_process_group(backend='nccl', timeout=timedelta(hours=8))
             self.local_rank = int(os.environ["LOCAL_RANK"])
         writer = None
         if self.local_rank == 0:
@@ -632,11 +632,12 @@ class MASRTrainer(object):
 
         error_results, losses = [], []
         eos = self.test_dataset.vocab_size - 1
+        os.makedirs('models', exist_ok=True)
         eval_txt_path = 'models/eval_epoch_' + str(epoch_id) + '.txt'
         f = open(eval_txt_path, 'w', encoding='utf-8')
         eval_result_buffer = ''
         with torch.no_grad():
-            tests = self.test_loader()
+            tests = self.test_loader
             step_to_display_batch_id = len(tests) // portion_to_display_batch_id
             if display_result:
                 step_to_display_batch_id = 20

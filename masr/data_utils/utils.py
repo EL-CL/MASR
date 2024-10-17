@@ -8,9 +8,9 @@ import wave
 import gc
 import av
 import numpy as np
-import resampy
+# import resampy
 import soundfile
-from pydub import AudioSegment
+# from pydub import AudioSegment
 from tqdm import tqdm
 
 from masr.data_utils.binary import DatasetWriter

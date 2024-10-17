@@ -4,7 +4,7 @@ import os
 import random
 
 import numpy as np
-import resampy
+# import resampy
 import soundfile
 from scipy import signal
 
