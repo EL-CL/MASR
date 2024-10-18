@@ -313,14 +313,23 @@ class MASRTrainer(object):
                     "version": __version__}
             f.write(json.dumps(data))
         if not save_as_best_model:
+            logger.info('已保存模型：{}'.format(model_path))
             last_model_path = os.path.join(save_model_path, save_model_name, 'last_model')
             shutil.rmtree(last_model_path, ignore_errors=True)
             shutil.copytree(model_path, last_model_path)
             # 删除旧的模型
-            # old_model_path = os.path.join(save_model_path, save_model_name, 'epoch_{}'.format(epoch_id - 3))
-            # if os.path.exists(old_model_path):
-            #     shutil.rmtree(old_model_path)
-        logger.info('已保存模型：{}'.format(model_path))
+            if epoch_id % 5 == 0:
+                candidate_folders = ['epoch_{}'.format(i) for i in range(epoch_id - 10, epoch_id - 5)]
+                candidate_folders += ['epoch_{}_best'.format(i) for i in range(epoch_id - 10, epoch_id - 5)]
+                best_folder_found = False
+                for folder in reversed(candidate_folders):
+                    old_path = os.path.join(save_model_path, save_model_name, folder)
+                    if not os.path.exists(old_path):
+                        continue
+                    if not best_folder_found:
+                        best_folder_found = True
+                    else:
+                        shutil.rmtree(old_path)
 
     def __decoder_result(self, outs, vocabulary):
         # 集束搜索方法的处理
