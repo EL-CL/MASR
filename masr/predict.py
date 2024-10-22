@@ -219,11 +219,12 @@ class MASRPredictor:
             # 执行识别
             result = self.predict(audio_data=audio_ndarray, use_pun=False, is_itn=is_itn)
             score, text = result['score'], result['text']
+            text = ''.join(text)
             if text != '':
-                texts = texts + text if use_pun else texts + '，' + text
+                texts = texts + text if use_pun else texts + '¦' + text
             scores.append(score)
             logger.info(f'长语音识别片段结果：{text}')
-        if texts[0] == '，': texts = texts[1:]
+        if texts[0] == '¦': texts = texts[1:]
         # 加标点符号
         if use_pun and len(texts) > 0:
             if self.pun_predictor is not None:
