@@ -722,15 +722,17 @@ class MASRTrainer(object):
         self.model.eval()
         # 获取静态模型
         infer_model = self.model.export()
-        save_model_name = f'{self.configs.use_model}_{"streaming" if self.configs.streaming else "non-streaming"}' \
-                          f'_{self.configs.preprocess_conf.feature_method}'
-        infer_model_path = os.path.join(save_model_path, save_model_name, 'inference.pt')
+        suffix = resume_model.split('/')[-2]
+        if suffix.startswith('epoch_'):
+            suffix = suffix.replace('epoch_', '')
+        suffix = suffix.split('_')[0]
+        infer_model_path = os.path.join(save_model_path, f'inference_{suffix}.pt')
         os.makedirs(os.path.dirname(infer_model_path), exist_ok=True)
         torch.jit.save(infer_model, infer_model_path)
         logger.info("预测模型已保存：{}".format(infer_model_path))
         # 保存量化模型
         if save_quant:
-            quant_model_path = os.path.join(os.path.dirname(infer_model_path), 'inference_quant.pt')
+            quant_model_path = infer_model_path.replace('.pt', '_quant.pt')
             quantized_model = torch.quantization.quantize_dynamic(self.model)
             script_quant_model = torch.jit.script(quantized_model)
             torch.jit.save(script_quant_model, quant_model_path)
