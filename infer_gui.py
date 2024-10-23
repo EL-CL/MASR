@@ -59,11 +59,11 @@ def format_result(text):
     text = ''.join(text)
     text = text.replace('.', ' ')
     text = text.replace('¦', ', ')
-    text = text.strip(', ')
-    text = text.strip()
     text = re.sub(r'([0-9]+) *', r'\1 ', text)
     text = re.sub(r' +,', r',', text)
     text = text.translate(number2superscript)
+    text = text.strip(', ')
+    text = text.strip()
     return text
 
 

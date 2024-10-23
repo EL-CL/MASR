@@ -18,4 +18,5 @@ convert_model.py
 build/
 dist/
 masr.egg-info/
+static/*.woff*
 .ipynb_checkpoints

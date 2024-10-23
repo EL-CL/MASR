@@ -6,6 +6,8 @@ import sys
 import time
 import wave
 from datetime import datetime
+import yaml
+import re
 
 import aiofiles
 import uvicorn
@@ -25,16 +27,43 @@ add_arg = functools.partial(add_arguments, argparser=parser)
 add_arg('configs',          str,    'configs/conformer.yml', "配置文件")
 add_arg("host",             str,    '0.0.0.0',            "监听主机的IP地址")
 add_arg("port",             int,    5000,                 "服务所使用的端口号")
-add_arg("save_path",        str,    'dataset/upload/',    "上传音频文件的保存目录")
-add_arg('use_gpu',          bool,   True,   "是否使用GPU预测")
+add_arg("save_path",        str,    'recordings/uploaded/', "上传音频文件的保存目录")
+add_arg('use_gpu',          bool,   False,  "是否使用GPU预测")
 add_arg('use_pun',          bool,   False,  "是否给识别结果加标点符号")
 add_arg('is_itn',           bool,   False,  "是否对文本进行反标准化")
-add_arg('model_path',       str,    'models/conformer_streaming_fbank/inference.pt', "导出的预测模型文件路径")
+add_arg('model_path',       str,    'models/inference.pt',       "导出的预测模型文件路径")
 add_arg('pun_model_dir',    str,    'models/pun_models/',        "加标点符号的模型文件夹路径")
 args = parser.parse_args()
 print_arguments(args=args)
 
-app = FastAPI(title="PPASR")
+with open(args.configs, 'r', encoding='utf-8') as f:
+    args.configs = yaml.load(f.read(), Loader=yaml.FullLoader)
+# 数据字典的路径
+args.configs['dataset_conf']['dataset_vocab'] = 'models/vocabulary.txt'
+# 结果解码方法，支持：ctc_beam_search、ctc_greedy
+args.configs['decoder'] = 'ctc_greedy'
+# ctc_beam_search 解码器的语言模型文件路径
+args.configs['ctc_beam_search_decoder_conf']['language_model_path'] = 'models/lm.klm'
+print_arguments(configs=args.configs)
+
+numbers = '0123456789'
+superscripts = '⁰¹²³⁴⁵⁶⁷⁸⁹'
+number2superscript = str.maketrans(numbers, superscripts)
+
+
+def format_result(text):
+    text = ''.join(text)
+    text = text.replace('.', ' ')
+    text = text.replace('¦', ', ')
+    text = re.sub(r'([0-9]+) *', r'\1 ', text)
+    text = re.sub(r' +,', r',', text)
+    text = text.translate(number2superscript)
+    text = text.strip(', ')
+    text = text.strip()
+    return text
+
+
+app = FastAPI(title="国际音标识别")
 app.mount('/static', StaticFiles(directory='static'), name='static')
 templates = Jinja2Templates(directory="templates")
 
@@ -50,49 +79,27 @@ predictor = MASRPredictor(configs=args.configs,
 @app.post("/recognition")
 async def recognition(audio: UploadFile = File(..., description="音频文件")):
     # 保存路径
-    save_dir = os.path.join(args.save_path, datetime.now().strftime('%Y-%m-%d'))
+    save_dir = os.path.join(args.save_path, datetime.now().strftime('%Y-%m'))
     os.makedirs(save_dir, exist_ok=True)
     suffix = audio.filename.split('.')[-1]
-    file_path = os.path.join(save_dir, f'{int(time.time() * 1000)}_{random.randint(100, 999)}.{suffix}')
+    file_path = os.path.join(save_dir, f'{time.strftime("%Y%m%d-%H%M%S")}-{random.randint(100, 999)}.{suffix}')
     async with aiofiles.open(file_path, 'wb') as out_file:
         content = await audio.read()
         await out_file.write(content)
     try:
         start = time.time()
         # 执行识别
-        result = predictor.predict(audio_data=file_path, use_pun=args.use_pun, is_itn=args.is_itn)
-        score, text = result['score'], result['text']
+        # TODO: 读取音频看时长
+        func = predictor.predict if True else predictor.predict_long
+        result = func(audio_data=file_path, use_pun=args.use_pun, is_itn=args.is_itn)
+        score, text = result['score'], format_result(result['text'])
         end = time.time()
-        print("识别时间：%dms，识别结果：%s， 得分: %f" % (round((end - start) * 1000), text, score))
-        result = {"code": 0, "msg": "success", "result": text, "score": round(score, 3)}
+        print("结　果：%s\n可靠度：%f\n耗　时：%d ms" % (text, score, round((end - start) * 1000)))
+        result = {"code": 0, "msg": "success", "result": text, "score": round(score, 2)}
         return result
     except Exception as e:
-        print(f'[{datetime.now()}] 短语音识别失败，错误信息：{e}', file=sys.stderr)
-        return {"error": 1, "msg": "audio read fail!"}
-
-
-# 长语音识别接口
-@app.post("/recognition_long_audio")
-async def recognition_long_audio(audio: UploadFile = File(..., description="音频文件")):
-    # 保存路径
-    save_dir = os.path.join(args.save_path, datetime.now().strftime('%Y-%m-%d'))
-    os.makedirs(save_dir, exist_ok=True)
-    suffix = audio.filename.split('.')[-1]
-    file_path = os.path.join(save_dir, f'{int(time.time() * 1000)}_{random.randint(100, 999)}.{suffix}')
-    async with aiofiles.open(file_path, 'wb') as out_file:
-        content = await audio.read()
-        await out_file.write(content)
-    try:
-        start = time.time()
-        result = predictor.predict_long(audio_data=file_path, use_pun=args.use_pun, is_itn=args.is_itn)
-        score, text = result['score'], result['text']
-        end = time.time()
-        print("识别时间：%dms，识别结果：%s， 得分: %f" % (round((end - start) * 1000), text, score))
-        result = {"code": 0, "msg": "success", "result": text, "score": score}
-        return result
-    except Exception as e:
-        print(f'[{datetime.now()}] 长语音识别失败，错误信息：{e}', file=sys.stderr)
-        return {"error": 1, "msg": "audio read fail!"}
+        print(f'[{datetime.now()}] 语音识别失败，错误信息：{e}', file=sys.stderr)
+        return {"error": 1, "msg": "音频读取失败！"}
 
 
 @app.get("/")
@@ -121,8 +128,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 result = predictor.predict_stream(audio_data=data, use_pun=args.use_pun, is_itn=args.is_itn,
                                                   is_end=is_end)
                 if result is not None:
-                    score, text = result['score'], result['text']
-                send_data = {"code": 0, "result": text}
+                    score, text = result['score'], format_result(result['text'])
+                send_data = {"code": 0, "result": text, "score": round(score, 2)}
                 logger.info(f'向客户端发生消息：{send_data}')
                 await websocket.send_json(send_data)
                 # 结束了要关闭当前的连接
@@ -140,9 +147,9 @@ async def websocket_endpoint(websocket: WebSocket):
         predictor.reset_stream()
         predictor.running = False
         # 保存录音
-        save_dir = os.path.join(args.save_path, datetime.now().strftime('%Y-%m-%d'))
+        save_dir = os.path.join(args.save_path, datetime.now().strftime('%Y-%m'))
         os.makedirs(save_dir, exist_ok=True)
-        file_path = os.path.join(save_dir, f'{int(time.time() * 1000)}.wav')
+        file_path = os.path.join(save_dir, f'{time.strftime("%Y%m%d-%H%M%S")}-{random.randint(100, 999)}.wav')
         audio_bytes = b''.join(frames)
         wf = wave.open(file_path, 'wb')
         wf.setnchannels(1)

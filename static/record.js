@@ -3,7 +3,7 @@ window.URL = window.URL || window.webkitURL;
 //获取计算机的设备：摄像头或者录音设备
 navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia || navigator.msGetUserMedia;
 
-var MASRRecorder = function (stream, url, textResult) {
+var MASRRecorder = function (stream, url, messageDiv, resultText, scoreText) {
     var socket = new WebSocket(url);
     var sampleBits = 16; //输出采样数位 8, 16
     var sampleRate = 16000; //输出采样率
@@ -68,7 +68,6 @@ var MASRRecorder = function (stream, url, textResult) {
     }
 
     this.stop = function () {
-        console.log('关闭对讲以及WebSocket');
         recorder.disconnect();
         if (socket) {
             socket.close();
@@ -105,59 +104,34 @@ var MASRRecorder = function (stream, url, textResult) {
     socket.onopen = () => {
         socket.binaryType = 'arraybuffer';
         this.start();
-        textResult.value = ''
     };
     //接收到消息的回调方法
     socket.onmessage = function (MesssageEvent) {
         //返回结果
         let jsonStr = MesssageEvent.data;
-        console.log(jsonStr)
         let data = JSON.parse(jsonStr)
-        let code = data['code'];
-        if (code === 0){
-            textResult.value = data['result']
-        }else {
-            let msg = data['msg'];
-            alert('报错，错误信息：' + msg)
+        let code = data.code;
+        if (code === 0) {
+            if (data.result) {
+                messageDiv.classList.add('has-result')
+                messageDiv.classList.add('has-score')
+                resultText.innerText = data.result;
+                scoreText.innerText = data.score;
+            }
+        } else {
+            let msg = data.msg;
+            alert('报错，错误信息：' + msg);
         }
     }
     //连接关闭的回调方法
     socket.onerror = function (err) {
         console.info(err)
-        textResult.value = err
+        resultText.value = err
     }
     //关闭websocket连接
     socket.onclose = function (msg) {
-        console.info(msg);
     };
 };
-
-// WebSocket客户端
-PPASRWebSocket = function useWebSocket(url, record, textResult) {
-    ws = new WebSocket(url);
-    //连接成功建立的回调方法
-    ws.onopen = function () {
-        ws.binaryType = 'arraybuffer';
-        record.start();
-        textResult.innerText = ''
-    };
-    //接收到消息的回调方法
-    ws.onmessage = function (MesssageEvent) {
-        //返回结果
-        var jsonStr = MesssageEvent.data;
-        console.log(jsonStr)
-        textResult.innerText = JSON.parse(jsonStr)['result']
-    }
-    //连接关闭的回调方法
-    ws.onerror = function (err) {
-        console.info(err)
-        textResult.innerText = err
-    }
-    //关闭websocket连接
-    ws.onclose = function (msg) {
-        console.info(msg);
-    };
-}
 
 //抛出异常
 MASRRecorder.throwError = function (message) {
@@ -171,13 +145,13 @@ MASRRecorder.throwError = function (message) {
 //是否支持录音
 MASRRecorder.canRecording = (navigator.getUserMedia != null);
 //获取录音机
-MASRRecorder.get = function (callback, url, textarea) {
+MASRRecorder.get = function (callback, url, messageDiv, resultText, scoreText) {
     if (callback) {
         if (navigator.getUserMedia) {
             navigator.getUserMedia(
                 {audio: true} //只启用音频
                 , function (stream) {
-                    var record = new MASRRecorder(stream, url, textarea);
+                    var record = new MASRRecorder(stream, url, messageDiv, resultText, scoreText);
                     callback(record);
                 }
                 , function (error) {
