@@ -6,6 +6,7 @@ import json
 import os
 import queue
 import time
+import tkinter.font
 import tkinter.messagebox
 import wave
 from tkinter import *
@@ -50,24 +51,30 @@ args.configs['decoder'] = 'ctc_greedy'
 args.configs['ctc_beam_search_decoder_conf']['language_model_path'] = 'models/lm.klm'
 print_arguments(configs=args.configs)
 
-numbers = '0123456789'
-superscripts = '⁰¹²³⁴⁵⁶⁷⁸⁹'
-number2superscript = str.maketrans(numbers, superscripts)
-
-
-def format_result(text):
-    text = ''.join(text)
-    text = text.replace('.', ' ')
-    text = text.replace('¦', ', ')
-    text = re.sub(r'([0-9]+) *', r'\1 ', text)
-    text = re.sub(r' +,', r',', text)
-    text = text.translate(number2superscript)
-    text = text.strip(', ')
-    text = text.strip()
-    return text
+tones_raw = '0123456'
+tones_to_display = {
+    '数字': '⁰¹²³⁴⁵⁶',
+    '符号': ['', '˩', '˨', '˧', '˦', '˥', '˥'],
+    '隐藏': [''] * 7,
+}
 
 
 class SpeechRecognitionApp:
+    def format_result(self, text):
+        text = ''.join(text)
+        text = text.replace('.', ' ')
+        text = text.replace('¦', ', ')
+        text = re.sub(r'([0-9]+) *', r'\1 ', text)
+        text = re.sub(r' +,', r',', text)
+        tone_style = self.tone_style_selected.get()
+        trans_dict = dict(zip(tones_raw, tones_to_display[tone_style]))
+        text = text.translate(str.maketrans(trans_dict))
+        if tone_style == '符号':
+            text = re.sub(r'([˩˨˧˦˥])\1+', r'\1', text)
+        text = text.strip(', ')
+        text = text.strip()
+        return text
+
     def __init__(self, window: Tk, args):
         self.window = window
         self.wav_path = None
@@ -87,28 +94,36 @@ class SpeechRecognitionApp:
         self.max_record = 600
         # 录音保存的路径
         self.output_path = 'recordings/'
+        # 调整默认字号
+        tkinter.font.nametofont("TkDefaultFont").configure(size=12)
         # 指定窗口标题
         self.window.title("国际音标识别")
         # 固定窗口大小
         self.window.geometry('1200x600')
         self.window.resizable(False, False)
         # 识别短语音按钮
-        self.short_button = Button(self.window, text="打开音频", width=20, command=self.predict_audio_thread)
+        self.short_button = Button(self.window, text="打开音频", width=14, command=self.predict_audio_thread)
         self.short_button.place(x=170, y=10)
         # 识别长语音按钮
-        # self.long_button = Button(self.window, text="打开长音频", width=20, command=self.predict_long_audio_thread)
+        # self.long_button = Button(self.window, text="打开长音频", width=14, command=self.predict_long_audio_thread)
         # self.long_button.place(x=490, y=10)
         # 录音按钮
-        self.record_button = Button(self.window, text="录制音频", width=20, command=self.record_audio_thread)
+        self.record_button = Button(self.window, text="录制音频", width=14, command=self.record_audio_thread)
         self.record_button.place(x=10, y=10)
         # 播放音频按钮
-        self.play_button = Button(self.window, text="播放音频", width=20, command=self.play_audio_thread)
+        self.play_button = Button(self.window, text="播放音频", width=14, command=self.play_audio_thread)
         self.play_button.place(x=330, y=10)
+        # 选择声调风格
+        Label(self.window, text="声调标记：").place(x=520, y=14)
+        self.tone_style_selected = StringVar(None, '数字')
+        for i, tone_style in enumerate(tones_to_display.keys()):
+            r = Radiobutton(self.window, text=tone_style, value=tone_style, variable=self.tone_style_selected)
+            r.place(x=610 + i * 70, y=12)
         # 输出结果文本框
         self.result_label = Label(self.window, text="输出：")
-        self.result_label.place(x=10, y=50)
+        self.result_label.place(x=10, y=60)
         self.result_text = Text(self.window, font=('Doulos SIL', 20), wrap=WORD, padx=20, pady=15)
-        self.result_text.place(x=10, y=80, width=1180, height=510)
+        self.result_text.place(x=10, y=90, width=1180, height=500)
         self.result_text.configure(state='disabled')
         # 对文本进行反标准化
         # self.an_frame = Frame(self.window)
@@ -239,7 +254,7 @@ class SpeechRecognitionApp:
                 result = self.predictor.predict_stream(audio_data=data, use_pun=args.use_pun, is_itn=self.is_itn,
                                                        is_end=not self.recording, sample_rate=self.sample_rate)
                 if result is None: continue
-                score, text = result['score'], format_result(result['text'])
+                score, text = result['score'], self.format_result(result['text'])
                 self.result_text.configure(state='normal')
                 self.result_text.delete('1.0', 'end')
                 self.result_text.insert(END, "【实时识别】\n")
@@ -273,7 +288,7 @@ class SpeechRecognitionApp:
             # 判断使用本地识别还是调用服务接口
             if not self.use_server:
                 result = self.predictor.predict(audio_data=wav_file, use_pun=args.use_pun, is_itn=self.is_itn)
-                score, text = result['score'], format_result(result['text'])
+                score, text = result['score'], self.format_result(result['text'])
             else:
                 # 调用用服务接口识别
                 url = f"http://{args.host}:{args.port_server}/recognition"
@@ -312,7 +327,7 @@ class SpeechRecognitionApp:
             # 判断使用本地识别还是调用服务接口
             if not self.use_server:
                 result = self.predictor.predict_long(audio_data=wav_path, use_pun=args.use_pun, is_itn=self.is_itn)
-                score, text = result['score'], format_result(result['text'])
+                score, text = result['score'], self.format_result(result['text'])
             else:
                 # 调用用服务接口识别
                 url = f"http://{args.host}:{args.port_server}/recognition_long_audio"
