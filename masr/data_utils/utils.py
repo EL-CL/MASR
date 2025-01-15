@@ -106,12 +106,12 @@ def create_manifest(annotation_path, train_manifest_path, test_manifest_path, is
                     # 过滤非法的字符
                     text = is_ustr(text)
                 if len(text) == 0 or text == ' ': continue
-                text = text.split('|')
+                text = text.split('|') if '|' in text else list(text)
                 # 加入数据列表中
                 line = dict(audio_filepath=audio_path.replace('\\', '/'),
                             text=text,
                             duration=duration)
-                if annotation_text_path.endswith('test.json'):
+                if annotation_text_path.endswith('test.txt'):
                     test_list.append(line)
                 else:
                     data_list.append(line)
