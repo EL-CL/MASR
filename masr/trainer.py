@@ -468,6 +468,7 @@ class MASRTrainer(object):
             logger.info('合并音频已完成，原始音频文件和标注文件已自动删除，其他原始文件可手动删除！')
 
         logger.info('开始生成数据列表...')
+        os.makedirs(os.path.dirname(self.configs.dataset_conf.train_manifest), exist_ok=True)
         create_manifest(annotation_path=annotation_path,
                         train_manifest_path=self.configs.dataset_conf.train_manifest,
                         test_manifest_path=self.configs.dataset_conf.test_manifest,
