@@ -54,6 +54,10 @@ dataset_conf:
   noise_manifest_path: '../IPA-recognition/manifest1017/manifest.noise'
   # 数据列表类型，支持txt、binary
   manifest_type: 'binary'
+  cls_tokens:
+    - '<cls-non-tonal>'
+    - '<cls-acc-tonal>'
+    - '<cls-num-tonal>'
 
 # 数据预处理参数
 preprocess_conf:

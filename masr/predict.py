@@ -87,7 +87,8 @@ class MASRPredictor:
                                             use_gpu=self.use_gpu)
         # 预热
         warmup_audio = np.random.uniform(low=-2.0, high=2.0, size=(134240,))
-        self.predict(audio_data=warmup_audio, is_itn=False)
+        self.predict(audio_data=warmup_audio, is_itn=False,
+                     cls_token=0 if self.configs.dataset_conf.cls_tokens else None)
         if 'online' in self.configs.use_model:
             self.predict_stream(audio_data=warmup_audio[:8000], is_itn=False)
         self.reset_stream()
@@ -115,7 +116,7 @@ class MASRPredictor:
             self.vad_predictor = VADPredictor()
 
     # 解码模型输出结果
-    def decode(self, output_data, use_pun, is_itn):
+    def decode(self, output_data, use_pun, is_itn, remove_cls_token):
         """
         解码模型输出结果
         :param output_data: 模型输出结果
@@ -141,6 +142,9 @@ class MASRPredictor:
         # 是否对文本进行反标准化
         if is_itn:
             text = self.inverse_text_normalization(text)
+        if remove_cls_token:
+            text = [i for i in text if i not in self.configs.dataset_conf.cls_tokens]
+        text = ''.join(text)
         return score, text
 
     @staticmethod
@@ -168,7 +172,9 @@ class MASRPredictor:
                 audio_data,
                 use_pun=False,
                 is_itn=False,
-                sample_rate=16000):
+                sample_rate=16000,
+                cls_token=None,
+                remove_cls_token=True):
         """
         预测函数，只预测完整的一句话。
         :param audio_data: 需要识别的数据，支持文件路径，文件对象，字节，numpy。如果是字节的话，必须是完整的字节文件
@@ -184,10 +190,10 @@ class MASRPredictor:
         audio_len = np.array([input_data.shape[1]]).astype(np.int64)
 
         # 运行predictor
-        output_data = self.predictor.predict(input_data, audio_len)[0]
+        output_data = self.predictor.predict(input_data, audio_len, cls_token)[0]
 
         # 解码
-        score, text = self.decode(output_data=output_data, use_pun=use_pun, is_itn=is_itn)
+        score, text = self.decode(output_data=output_data, use_pun=use_pun, is_itn=is_itn, remove_cls_token=remove_cls_token)
         result = {'text': text, 'score': score}
         return result
 
@@ -196,7 +202,8 @@ class MASRPredictor:
                      audio_data,
                      use_pun=False,
                      is_itn=False,
-                     sample_rate=16000):
+                     sample_rate=16000,
+                     cls_token=None):
         """
         预测函数，只预测完整的一句话。
         :param audio_data: 需要识别的数据，支持文件路径，文件对象，字节，numpy。如果是字节的话，必须是完整的字节文件
@@ -217,7 +224,7 @@ class MASRPredictor:
         for t in speech_timestamps:
             audio_ndarray = audio_segment.samples[t['start']: t['end']]
             # 执行识别
-            result = self.predict(audio_data=audio_ndarray, use_pun=False, is_itn=is_itn)
+            result = self.predict(audio_data=audio_ndarray, use_pun=False, is_itn=is_itn, cls_token=cls_token)
             score, text = result['score'], result['text']
             text = ''.join(text)
             if text != '':
@@ -242,7 +249,9 @@ class MASRPredictor:
                        is_itn=False,
                        channels=1,
                        samp_width=2,
-                       sample_rate=16000):
+                       sample_rate=16000,
+                       cls_token=None,
+                       remove_cls_token=True):
         """
         预测函数，流式预测，通过一直输入音频数据，实现实时识别。
         :param audio_data: 需要预测的音频wave读取的字节流或者未预处理的numpy值
@@ -313,7 +322,8 @@ class MASRPredictor:
                 num_decoding_left_chunks = -1
                 required_cache_size = decoding_chunk_size * num_decoding_left_chunks
                 output_chunk_probs = self.predictor.predict_chunk_conformer(x_chunk=x_chunk,
-                                                                            required_cache_size=required_cache_size)
+                                                                            required_cache_size=required_cache_size,
+                                                                            cls_token=cls_token)
                 output_lens = np.array([output_chunk_probs.shape[1]])
             else:
                 raise Exception(f'当前模型不支持该方法，当前模型为：{self.configs.use_model}')
@@ -339,7 +349,9 @@ class MASRPredictor:
         # 是否对文本进行反标准化
         if is_itn:
             text = self.inverse_text_normalization(text)
-
+        if remove_cls_token:
+            text = [i for i in text if i not in self.configs.dataset_conf.cls_tokens]
+        text = ''.join(text)
         result = {'text': text, 'score': score}
         return result
 

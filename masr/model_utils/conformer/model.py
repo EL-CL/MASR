@@ -22,6 +22,7 @@ class ConformerModel(torch.nn.Module):
             streaming: bool = True,
             encoder_conf: Dict = None,
             decoder_conf: Dict = None,
+            cls_token_count: int = 0,
             ctc_weight: float = 0.5,
             ignore_id: int = IGNORE_ID,
             reverse_weight: float = 0.0,
@@ -49,6 +50,7 @@ class ConformerModel(torch.nn.Module):
                                             encoder_output_size=self.encoder.output_size(),
                                             **decoder_conf if decoder_conf is not None else {})
 
+        self.cls_embedding = torch.nn.Embedding(cls_token_count, self.encoder.output_size()) if cls_token_count else None
         self.ctc = CTCLoss(vocab_size, self.encoder.output_size())
         # note that eos is the same as sos (equivalent ID)
         self.sos = vocab_size - 1
@@ -71,13 +73,15 @@ class ConformerModel(torch.nn.Module):
             speech_lengths: torch.Tensor,
             text: torch.Tensor,
             text_lengths: torch.Tensor,
+            cls_tokens: torch.Tensor = torch.empty(0),
     ):
         """Frontend + Encoder + Decoder + Calc loss
         Args:
             speech: (Batch, Length, ...)
             speech_lengths: (Batch, )
             text: (Batch, Length)
-            text_lengths: (Batch,)
+            text_lengths: (Batch, )
+            cls_tokens: (Batch, )
         Returns:
             total_loss, attention_loss, ctc_loss
         """
@@ -87,6 +91,11 @@ class ConformerModel(torch.nn.Module):
                 text_lengths.shape[0]), (speech.shape, speech_lengths.shape, text.shape, text_lengths.shape)
         # 1. Encoder
         encoder_out, encoder_mask = self.encoder(speech, speech_lengths)
+        if self.cls_embedding is not None:
+            cls_tokens = self.cls_embedding(cls_tokens).unsqueeze(1)  # [B] -> [B, 1, D]
+            encoder_out = torch.cat([cls_tokens, encoder_out], dim=1)  # [B, T, D] -> [B, T+1, D]
+            cls_mask = torch.ones([cls_tokens.size(0), 1, cls_tokens.size(1)], dtype=torch.bool, device=cls_tokens.device)
+            encoder_mask = torch.cat([cls_mask, encoder_mask], dim=2)  # [B, 1, T] -> [B, 1, T+1]
         encoder_out_lens = encoder_mask.squeeze(1).sum(1)  # [B, 1, T] -> [B]
 
         # 2a. Attention-decoder branch
@@ -150,12 +159,18 @@ class ConformerModel(torch.nn.Module):
         return loss_att, acc_att
 
     @torch.jit.export
-    def get_encoder_out(self, speech: torch.Tensor, speech_lengths: torch.Tensor) -> torch.Tensor:
+    def get_encoder_out(
+            self,
+            speech: torch.Tensor,
+            speech_lengths: torch.Tensor,
+            cls_tokens: torch.Tensor = torch.empty(0),
+    ) -> torch.Tensor:
         """ Get encoder output
 
         Args:
             speech (torch.Tensor): (batch, max_len, feat_dim)
             speech_lengths (torch.Tensor): (batch, )
+            cls_tokens (torch.Tensor): (batch, )
         Returns:
             Tensor: ctc softmax output
         """
@@ -163,17 +178,22 @@ class ConformerModel(torch.nn.Module):
                                       speech_lengths,
                                       decoding_chunk_size=-1,
                                       num_decoding_left_chunks=-1)  # (B, maxlen, encoder_dim)
+        if self.cls_embedding is not None:
+            cls_tokens = self.cls_embedding(cls_tokens).unsqueeze(1)  # [B] -> [B, 1, D]
+            encoder_out = torch.cat([cls_tokens, encoder_out], dim=1)  # [B, T, D] -> [B, T+1, D]
         ctc_probs = self.ctc.softmax(encoder_out)
         return ctc_probs
 
     @torch.jit.export
-    def get_encoder_out_chunk(self,
-                              speech: torch.Tensor,
-                              offset: int,
-                              required_cache_size: int,
-                              att_cache: torch.Tensor = torch.zeros([0, 0, 0, 0]),
-                              cnn_cache: torch.Tensor = torch.zeros([0, 0, 0, 0])) -> \
-            Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def get_encoder_out_chunk(
+            self,
+            speech: torch.Tensor,
+            offset: int,
+            required_cache_size: int,
+            att_cache: torch.Tensor = torch.zeros([0, 0, 0, 0]),
+            cnn_cache: torch.Tensor = torch.zeros([0, 0, 0, 0]),
+            cls_tokens: torch.Tensor = torch.empty(0),
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """ Get encoder output
 
         Args:
@@ -186,6 +206,9 @@ class ConformerModel(torch.nn.Module):
                                                               required_cache_size=required_cache_size,
                                                               att_cache=att_cache,
                                                               cnn_cache=cnn_cache)
+        if self.cls_embedding is not None:
+            cls_tokens = self.cls_embedding(cls_tokens).unsqueeze(1)  # [B] -> [B, 1, D]
+            xs = torch.cat([cls_tokens, xs], dim=1)  # [B, T, D] -> [B, T+1, D]
         ctc_probs = self.ctc.softmax(xs)
         return ctc_probs, att_cache, cnn_cache
 

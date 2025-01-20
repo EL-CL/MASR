@@ -49,7 +49,7 @@ class InferencePredictor:
         self.offset = torch.tensor([0], dtype=torch.int32, device=self.device)
 
     # 预测音频
-    def predict(self, speech, speech_lengths):
+    def predict(self, speech, speech_lengths, cls_token=None):
         """
         预测函数，只预测完整的一句话。
         :param speech: 经过处理的音频数据
@@ -58,9 +58,10 @@ class InferencePredictor:
         """
         audio_data = torch.tensor(speech, dtype=torch.float32, device=self.device)
         audio_len = torch.tensor(speech_lengths, dtype=torch.int64, device=self.device)
+        cls_tokens = torch.tensor([cls_token], device=self.device) if cls_token is not None else torch.empty(0, device=self.device)
 
         # 非流式模型的输入
-        output_data = self.predictor.get_encoder_out(speech=audio_data, speech_lengths=audio_len)
+        output_data = self.predictor.get_encoder_out(speech=audio_data, speech_lengths=audio_len, cls_tokens=cls_tokens)
         return output_data.cpu().detach().numpy()
 
     def predict_chunk_deepspeech(self, x_chunk):
@@ -77,18 +78,20 @@ class InferencePredictor:
                                                  init_state_c=self.output_state_c)
         return output_chunk_probs.cpu().detach().numpy(), output_lens.cpu().detach().numpy()
 
-    def predict_chunk_conformer(self, x_chunk, required_cache_size):
+    def predict_chunk_conformer(self, x_chunk, required_cache_size, cls_token=None):
         if not ('former' in self.use_model and self.streaming):
             raise Exception(f'当前模型不支持该方法，当前模型为：{self.use_model}，参数streaming为：{self.streaming}')
         x_chunk = torch.tensor(x_chunk, dtype=torch.float32, device=self.device)
         required_cache_size = torch.tensor([required_cache_size], dtype=torch.int32, device=self.device)
+        cls_tokens = torch.tensor([cls_token], device=self.device) if cls_token is not None else torch.empty(0, device=self.device)
 
         output_chunk_probs, self.att_cache, self.cnn_cache = \
             self.predictor.get_encoder_out_chunk(speech=x_chunk,
                                                  offset=self.offset,
                                                  required_cache_size=required_cache_size,
                                                  att_cache=self.att_cache,
-                                                 cnn_cache=self.cnn_cache)
+                                                 cnn_cache=self.cnn_cache,
+                                                 cls_tokens=cls_tokens)
 
         self.offset += output_chunk_probs.shape[1]
         return output_chunk_probs.cpu().detach().numpy()

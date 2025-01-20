@@ -10,6 +10,7 @@ parser = argparse.ArgumentParser(description=__doc__)
 add_arg = functools.partial(add_arguments, argparser=parser)
 add_arg('configs',          str,    'configs/conformer.yml',     "配置文件")
 add_arg('wav_path',         str,    'dataset/test.wav',          "预测音频的路径")
+add_arg('cls_token',        int,    0,                           "转写任务的ID")
 add_arg('is_long_audio',    bool,   False,                       "是否为长语音")
 add_arg('real_time_demo',   bool,   False,                       "是否使用实时语音识别演示")
 add_arg('use_gpu',          bool,   True,                        "是否使用GPU预测")
@@ -18,6 +19,8 @@ add_arg('is_itn',           bool,   False,                       "是否对文�
 add_arg('model_path',       str,    'models/conformer_streaming_fbank/inference.pt', "导出的预测模型文件路径")
 add_arg('pun_model_dir',    str,    'models/pun_models/',        "加标点符号的模型文件夹路径")
 args = parser.parse_args()
+if 'cls_token' not in args:
+    args.cls_token = None
 print_arguments(args=args)
 
 # 获取识别器
@@ -31,7 +34,7 @@ predictor = MASRPredictor(configs=args.configs,
 # 短语音识别
 def predict_audio():
     start = time.time()
-    result = predictor.predict(audio_data=args.wav_path, use_pun=args.use_pun, is_itn=args.is_itn)
+    result = predictor.predict(audio_data=args.wav_path, use_pun=args.use_pun, is_itn=args.is_itn, cls_token=args.cls_token)
     score, text = result['score'], result['text']
     print(f"消耗时间：{int(round((time.time() - start) * 1000))}ms, 识别结果: {text}, 得分: {int(score)}")
 
@@ -39,7 +42,7 @@ def predict_audio():
 # 长语音识别
 def predict_long_audio():
     start = time.time()
-    result = predictor.predict_long(audio_data=args.wav_path, use_pun=args.use_pun, is_itn=args.is_itn)
+    result = predictor.predict_long(audio_data=args.wav_path, use_pun=args.use_pun, is_itn=args.is_itn, cls_token=args.cls_token)
     score, text = result['score'], result['text']
     print(f"长语音识别结果，消耗时间：{int(round((time.time() - start) * 1000))}, 得分: {score}, 识别结果: {text}")
 
@@ -60,7 +63,7 @@ def real_time_predict_demo():
         start = time.time()
         d = wf.readframes(CHUNK)
         result = predictor.predict_stream(audio_data=data, use_pun=args.use_pun, is_itn=args.is_itn, is_end=d == b'',
-                                          channels=channels, samp_width=samp_width, sample_rate=sample_rate)
+                                          channels=channels, samp_width=samp_width, sample_rate=sample_rate, cls_token=args.cls_token)
         data = d
         if result is None: continue
         score, text = result['score'], result['text']

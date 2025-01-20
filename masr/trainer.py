@@ -118,6 +118,8 @@ class MASRTrainer(object):
                                       batch_size=self.configs.dataset_conf.batch_size,
                                       collate_fn=collate_fn,
                                       num_workers=self.configs.dataset_conf.num_workers)
+        self.cls_i2v = {self.test_dataset.vocab_list.index(token): v
+                                 for v, token in enumerate(self.configs.dataset_conf.cls_tokens)}
 
     # 提取特征保存文件
     def extract_features(self, save_dir='dataset/features'):
@@ -193,6 +195,7 @@ class MASRTrainer(object):
                                         streaming=self.configs.streaming,
                                         encoder_conf=self.configs.encoder_conf,
                                         decoder_conf=self.configs.decoder_conf,
+                                        cls_token_count=len(self.configs.dataset_conf.cls_tokens),
                                         **self.configs.model_conf)
         elif self.configs.use_model == 'deepspeech2':
             self.model = DeepSpeech2Model(input_dim=input_dim,
@@ -377,9 +380,12 @@ class MASRTrainer(object):
                 num_utts = label_lens.size(0)
                 if num_utts == 0:
                     continue
+                cls_tokens = None
+                if self.configs.dataset_conf.cls_tokens:
+                    cls_tokens = torch.tensor([self.cls_i2v[i] for i in labels[:, 0].tolist()]).to(self.device)
                 # 执行模型计算，是否开启自动混合精度
                 with torch.amp.autocast('cuda', enabled=self.configs.train_conf.enable_amp):
-                    loss_dict = self.model(inputs, input_lens, labels, label_lens)
+                    loss_dict = self.model(inputs, input_lens, labels, label_lens, cls_tokens)
                 if torch.cuda.device_count() > 1 and batch_id % accum_grad != 0:
                     context = self.model.no_sync
                 else:
@@ -493,10 +499,13 @@ class MASRTrainer(object):
             fout.write('<blank>\t-1\n')
             fout.write('<unk>\t-1\n')
             for char, count in count_sorted:
+                if char in self.configs.dataset_conf.cls_tokens: continue
                 if char == ' ': char = '<space>'
                 # 跳过指定的字符阈值，超过这大小的字符都忽略
                 if count < count_threshold: break
                 fout.write('%s\t%d\n' % (char, count))
+            for cls_token in self.configs.dataset_conf.cls_tokens:
+                fout.write(f'{cls_token}\t-1\n')
             fout.write('<eos>\t-1\n')
         logger.info('数据字典生成完成！')
 
@@ -657,10 +666,12 @@ class MASRTrainer(object):
                 inputs = inputs.to(self.device)
                 labels = labels.to(self.device)
                 input_lens = input_lens.to(self.device)
-                loss_dict = eval_model(inputs, input_lens, labels, label_lens)
+                if self.configs.dataset_conf.cls_tokens:
+                    cls_tokens = torch.tensor([self.cls_i2v[i] for i in labels[:, 0].tolist()]).to(self.device)
+                loss_dict = eval_model(inputs, input_lens, labels, label_lens, cls_tokens)
                 losses.append(loss_dict['loss'].cpu().detach().numpy())
                 # 获取模型编码器输出
-                outputs = eval_model.get_encoder_out(inputs, input_lens).cpu().detach().numpy()
+                outputs = eval_model.get_encoder_out(inputs, input_lens, cls_tokens).cpu().detach().numpy()
                 out_strings = self.__decoder_result(outs=outputs, vocabulary=self.test_dataset.vocab_list)
                 labels_str = labels_to_string(labels, self.test_dataset.vocab_list, eos=eos)
                 if display_all_batch_id or batch_id % step_to_display_batch_id == 0:
