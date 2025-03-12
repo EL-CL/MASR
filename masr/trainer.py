@@ -2,6 +2,7 @@ import io
 import json
 import os
 import platform
+import random
 import shutil
 import time
 from collections import Counter
@@ -118,8 +119,15 @@ class MASRTrainer(object):
                                       batch_size=self.configs.dataset_conf.batch_size,
                                       collate_fn=collate_fn,
                                       num_workers=self.configs.dataset_conf.num_workers)
-        self.cls_i2v = {self.test_dataset.vocab_list.index(token): v
-                                 for v, token in enumerate(self.configs.dataset_conf.cls_tokens)}
+        self.cls_label_default = self.test_dataset.vocab_list.index(self.configs.dataset_conf.cls_tokens[0])
+        self.cls_label_to_vector = {self.test_dataset.vocab_list.index(token): v
+                                    for v, token in enumerate(self.configs.dataset_conf.cls_tokens)}
+        self.cls_labels_revocability = {self.test_dataset.vocab_list.index(token): v
+                                        for token, v in zip(
+                                            self.configs.dataset_conf.cls_tokens,
+                                            self.configs.dataset_conf.cls_tokens_revocability,
+                                        )}
+        self.tone_labels = set([self.test_dataset.vocab_list.index(token) for token in self.configs.dataset_conf.tone_tokens])
 
     # 提取特征保存文件
     def extract_features(self, save_dir='dataset/features'):
@@ -334,6 +342,26 @@ class MASRTrainer(object):
                     else:
                         shutil.rmtree(old_path)
 
+    def __revoke_tones(self, labels, label_lens):
+        if not self.cls_labels_revocability:
+            return labels, label_lens
+        need_revokes = [random.random() < self.cls_labels_revocability[cls_label]
+                        for cls_label in labels[:, 0].tolist()]
+        new_labels = []
+        for i, need_revoke in enumerate(need_revokes):
+            row = labels[i].tolist()
+            if need_revoke:
+                row = [t for t in row if t not in self.tone_labels]
+                row[0] = self.cls_label_default
+            row = [t for t in row if t != -1]
+            new_labels.append(row)
+        new_lens = [len(row) for row in new_labels]
+        padded_labels = torch.full((len(new_labels), max(new_lens)), -1, dtype=labels.dtype)
+        for i, row in enumerate(new_labels):
+            padded_labels[i, :len(row)] = torch.tensor(row, dtype=labels.dtype)
+        new_lens = torch.tensor(new_lens, dtype=label_lens.dtype)
+        return padded_labels, new_lens
+
     def __decoder_result(self, outs, vocabulary):
         # 集束搜索方法的处理
         if self.configs.decoder == "ctc_beam_search" and self.beam_search_decoder is None:
@@ -371,6 +399,7 @@ class MASRTrainer(object):
             for batch_id, batch in enumerate(self.train_loader):
                 if self.stop_train: break
                 inputs, labels, input_lens, label_lens = batch
+                labels, label_lens = self.__revoke_tones(labels, label_lens)
                 reader_times.append((time.time() - start) * 1000)
                 start_step = time.time()
                 inputs = inputs.to(self.device)
@@ -382,7 +411,7 @@ class MASRTrainer(object):
                     continue
                 cls_tokens = None
                 if self.configs.dataset_conf.cls_tokens:
-                    cls_tokens = torch.tensor([self.cls_i2v[i] for i in labels[:, 0].tolist()]).to(self.device)
+                    cls_tokens = torch.tensor([self.cls_label_to_vector[i] for i in labels[:, 0].tolist()]).to(self.device)
                 # 执行模型计算，是否开启自动混合精度
                 with torch.amp.autocast('cuda', enabled=self.configs.train_conf.enable_amp):
                     loss_dict = self.model(inputs, input_lens, labels, label_lens, cls_tokens)
@@ -663,11 +692,13 @@ class MASRTrainer(object):
             for batch_id, batch in enumerate(tests):
                 if self.stop_eval: break
                 inputs, labels, input_lens, label_lens = batch
+                labels, label_lens = self.__revoke_tones(labels, label_lens)
                 inputs = inputs.to(self.device)
                 labels = labels.to(self.device)
                 input_lens = input_lens.to(self.device)
+                cls_tokens = None
                 if self.configs.dataset_conf.cls_tokens:
-                    cls_tokens = torch.tensor([self.cls_i2v[i] for i in labels[:, 0].tolist()]).to(self.device)
+                    cls_tokens = torch.tensor([self.cls_label_to_vector[i] for i in labels[:, 0].tolist()]).to(self.device)
                 loss_dict = eval_model(inputs, input_lens, labels, label_lens, cls_tokens)
                 losses.append(loss_dict['loss'].cpu().detach().numpy())
                 # 获取模型编码器输出

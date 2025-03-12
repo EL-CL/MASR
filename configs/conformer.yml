@@ -58,6 +58,11 @@ dataset_conf:
     - '<cls-non-tonal>'
     - '<cls-acc-tonal>'
     - '<cls-num-tonal>'
+  cls_tokens_revocability:
+    - 0
+    - 0.33
+    - 0.2
+  tone_tokens: '12345'
 
 # 数据预处理参数
 preprocess_conf:
